@@ -5,6 +5,19 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      "/__birdeye": {
+        target: "https://bds.birdeye.so",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/__birdeye/, ""),
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            // Inject your API key + chain header into the outgoing request
+            proxyReq.setHeader("X-API-KEY", process.env.VITE_BIRDEYE_API_KEY || "");
+            proxyReq.setHeader("x-chain", "solana");
+            proxyReq.setHeader("accept", "application/json");
+          });
+        },
+      },
       "/__jup_price": {
         target: "https://price.jup.ag",
         changeOrigin: true,
@@ -19,12 +32,10 @@ export default defineConfig({
         target: "https://token.jup.ag",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/__jup_token/, ""),
-      }
+      },
     },
   },
   resolve: {
-    alias: {
-      "@": "/src",
-    },
+    alias: { "@": "/src" },
   },
 });
