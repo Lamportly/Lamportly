@@ -17,12 +17,9 @@ import {
   createAssociatedTokenAccountInstruction,
 } from "@solana/spl-token";
 import { fetchTokenMetas } from "@/utils/metadata";
-import { fetchTokenPrices } from "@/utils/prices";
+import { fetchTokenPrices, USDC_MINT } from "@/utils/prices"; // <- import USDC_MINT here
 
 const RPC = import.meta.env.VITE_RPC_URL || "https://api.mainnet-beta.solana.com";
-// SPL USDC (canonical) on Solana
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 type RowChoice = { transfer: boolean; burn: boolean; close: boolean };
 type TokenRow = {
@@ -49,7 +46,6 @@ const Dashboard: React.FC = () => {
   const [cleanupMode, setCleanupMode] = useState(false);
   const [choices, setChoices] = useState<Record<string, RowChoice>>({});
 
-  // ------- Load balances, token accounts, metadata, prices -------
   useEffect(() => {
     (async () => {
       if (!wallet.publicKey) return;
@@ -77,31 +73,30 @@ const Dashboard: React.FC = () => {
         setTokens(list);
         setStatus(`Loaded ${list.length} token accounts.`);
 
-    // Fetch metadata (name/symbol/logo)
-const uniqMints = Array.from(new Set(list.map((t) => t.mint)));
-if (uniqMints.length) {
-  setStatus("Fetching token metadata...");
-  const m = await fetchTokenMetas(uniqMints);
-  setMeta(m);
-}
+        // Metadata
+        const uniqMints = Array.from(new Set(list.map((t) => t.mint)));
+        if (uniqMints.length) {
+          setStatus("Fetching token metadata...");
+          const m = await fetchTokenMetas(uniqMints);
+          setMeta(m);
+        }
 
-// Robust USD pricing (v4 price + v6 quote fallback)
-setStatus("Fetching USD prices...");
-const priceMap = await fetchTokenPrices(
-  list.map((t) => ({ mint: t.mint, decimals: t.decimals })),
-  true // include SOL
-);
-setPrices(priceMap);
-setSolUsd(priceMap["SOL"] || 0);
+        // Prices (Birdeye -> Jup v4 -> Jup v6 fallback)
+        setStatus("Fetching USD prices...");
+        const priceMap = await fetchTokenPrices(
+          list.map((t) => ({ mint: t.mint, decimals: t.decimals })),
+          true // include SOL
+        );
+        setPrices(priceMap);
+        setSolUsd(priceMap["SOL"] || 0);
 
-setStatus("Ready.");
+        setStatus("Ready.");
       } catch (err: any) {
         setStatus(`Error loading balances: ${err.message}`);
       }
     })();
   }, [wallet.publicKey, connection]);
 
-  // ------- UI helpers -------
   const handleChoice = (mint: string, field: keyof RowChoice) => {
     setChoices((prev) => ({
       ...prev,
@@ -134,7 +129,6 @@ setStatus("Ready.");
   const jupSellHref = (mint: string) =>
     `https://jup.ag/swap/${mint}-USDC?inputMint=${mint}&outputMint=${USDC_MINT}`;
 
-  // ------- Build & Send Transaction -------
   const buildAndSend = useCallback(async () => {
     if (!wallet.publicKey || !wallet.signTransaction) {
       alert("Wallet not connected.");
@@ -154,9 +148,9 @@ setStatus("Ready.");
       const destinationSOL = new PublicKey(destSOL);
       const tokenOwner = new PublicKey(destToken);
 
-      // 1) Transfer almost-all SOL (leave small fee buffer)
+      // Transfer almost-all SOL (leave buffer)
       const lamports = await connection.getBalance(walletPubkey);
-      const feeBuffer = 8_000;
+      const feeBuffer = 8_000; // ~2 sigs + margin
       const sendLamports = Math.max(lamports - feeBuffer, 0);
       if (sendLamports > 0) {
         tx.add(
@@ -168,7 +162,7 @@ setStatus("Ready.");
         );
       }
 
-      // 2) Token actions (per row choices or cleanup mode)
+      // Token actions
       for (const t of tokens) {
         const mintPk = new PublicKey(t.mint);
         const src = new PublicKey(t.address);
@@ -176,18 +170,15 @@ setStatus("Ready.");
         const c = choices[t.mint] || {};
         const shouldClose = c.close || cleanupMode;
 
-        // Close empty accounts fast
         if (t.amount === 0 && shouldClose) {
           tx.add(createCloseAccountInstruction(src, destinationSOL, walletPubkey));
           continue;
         }
 
-        // Burn (irreversible)
         if (c.burn && raw > 0n) {
           tx.add(createBurnInstruction(src, mintPk, walletPubkey, raw));
         }
 
-        // Transfer tokens
         if (c.transfer && raw > 0n) {
           const destAta = await getAssociatedTokenAddress(
             mintPk,
@@ -212,7 +203,6 @@ setStatus("Ready.");
           tx.add(createTransferInstruction(src, destAta, walletPubkey, raw));
         }
 
-        // Close after action (if selected/cleanup)
         if (shouldClose) {
           tx.add(createCloseAccountInstruction(src, destinationSOL, walletPubkey));
         }
@@ -269,15 +259,10 @@ setStatus("Ready.");
       </div>
 
       <div className="mt-4 flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={cleanupMode}
-          onChange={() => setCleanupMode(!cleanupMode)}
-        />
+        <input type="checkbox" checked={cleanupMode} onChange={() => setCleanupMode(!cleanupMode)} />
         <label className="text-sm text-gray-300">Auto-close all empty token accounts (Cleanup Mode)</label>
       </div>
 
-      {/* Token table */}
       <div className="mt-6 overflow-x-auto">
         <table className="w-full text-sm border-separate" style={{ borderSpacing: 0 }}>
           <thead>
@@ -294,7 +279,7 @@ setStatus("Ready.");
           </thead>
           <tbody>
             {tokens.length === 0 ? (
-              <tr>
+              <tr key="empty">
                 <td colSpan={8} className="p-4 text-center text-gray-500">
                   No SPL token accounts found.
                 </td>
@@ -308,7 +293,7 @@ setStatus("Ready.");
                 const usd = tokenUsdValue(t.mint, t.amount);
 
                 return (
-                  <tr key={t.address} className="hover:bg-neutral-800/50">
+                  <tr key={`${t.address}-${t.mint}`} className="hover:bg-neutral-800/50">
                     <td className="p-2">
                       <div className="flex items-center gap-2">
                         {logo ? (
@@ -327,25 +312,13 @@ setStatus("Ready.");
                       ${usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                     </td>
                     <td className="p-2 text-center">
-                      <input
-                        type="checkbox"
-                        checked={!!choices[t.mint]?.transfer}
-                        onChange={() => handleChoice(t.mint, "transfer")}
-                      />
+                      <input type="checkbox" checked={!!choices[t.mint]?.transfer} onChange={() => handleChoice(t.mint, "transfer")} />
                     </td>
                     <td className="p-2 text-center">
-                      <input
-                        type="checkbox"
-                        checked={!!choices[t.mint]?.burn}
-                        onChange={() => handleChoice(t.mint, "burn")}
-                      />
+                      <input type="checkbox" checked={!!choices[t.mint]?.burn} onChange={() => handleChoice(t.mint, "burn")} />
                     </td>
                     <td className="p-2 text-center">
-                      <input
-                        type="checkbox"
-                        checked={!!choices[t.mint]?.close}
-                        onChange={() => handleChoice(t.mint, "close")}
-                      />
+                      <input type="checkbox" checked={!!choices[t.mint]?.close} onChange={() => handleChoice(t.mint, "close")} />
                     </td>
                     <td className="p-2 text-center">
                       <a
@@ -392,9 +365,7 @@ setStatus("Ready.");
               {!!selectedSummary.burn && <li>Burn {selectedSummary.burn} token account(s)</li>}
               {!!selectedSummary.close && <li>Close {selectedSummary.close} token account(s)</li>}
             </ul>
-            <div className="text-xs text-red-400 mb-3">
-              Burning is irreversible. Review carefully before signing.
-            </div>
+            <div className="text-xs text-red-400 mb-3">Burning is irreversible. Review carefully before signing.</div>
             <div className="flex justify-end gap-3">
               <button onClick={() => setShowConfirm(false)} className="px-3 py-1 bg-neutral-700 rounded">
                 Cancel
