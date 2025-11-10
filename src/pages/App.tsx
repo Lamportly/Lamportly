@@ -5,7 +5,6 @@ import { PhantomWalletAdapter, SolflareWalletAdapter, CoinbaseWalletAdapter } fr
 import Landing from "./Landing";
 import Dashboard from "./Dashboard";
 
-// Wallet adapter UI styles
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 const RPC = import.meta.env.VITE_RPC_URL || "https://api.devnet.solana.com";
@@ -20,14 +19,9 @@ export default function App() {
     <ConnectionProvider endpoint={RPC}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
-          <div className="container">
+          <div className="container text-white text-center py-10">
             <Landing />
-            <div className="mt-5" />
             <Dashboard />
-            <div className="mt-4 center small">
-              <span className="badge info">Non-custodial • User-signed only</span>
-              <div className="mt-2">RPC: {RPC.includes("devnet") ? "Devnet" : RPC}</div>
-            </div>
           </div>
         </WalletModalProvider>
       </WalletProvider>
