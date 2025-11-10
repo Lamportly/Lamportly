@@ -1,0 +1,17 @@
+{
+  "name": "Lamportly",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "es7-react-js-snippets"
+      ]
+    }
+  },
+  "postCreateCommand": "npm i"
+}
